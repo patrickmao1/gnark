@@ -2,6 +2,7 @@ package sw_bls12381
 
 import (
 	"fmt"
+	"github.com/consensys/gnark/std/math/uints"
 	"testing"
 
 	"github.com/consensys/gnark-crypto/ecc"
@@ -144,4 +145,48 @@ func TestIsogenyG1(t *testing.T) {
 	}
 	err := test.IsSolved(&IsogenyG1Circuit{}, &witness, ecc.BN254.ScalarField())
 	assert.NoError(err)
+}
+
+type hashToG1Circuit struct {
+	Msg []byte
+	Dst []byte
+	Res G1Affine
+}
+
+func (c *hashToG1Circuit) Define(api frontend.API) error {
+	g1, err := NewG1(api)
+	if err != nil {
+		return err
+	}
+	res, e := g1.HashToG1(uints.NewU8Array(c.Msg), c.Dst)
+	if e != nil {
+		return e
+	}
+
+	g1.AssertIsEqual(res, &c.Res)
+	return nil
+}
+
+func TestHashToG1TestSolve(t *testing.T) {
+	assert := test.NewAssert(t)
+	dst := getDst()
+
+	for _, msg := range getMsgs() {
+
+		expected, _ := bls12381.HashToG1([]uint8(msg), dst)
+		wrappedRes := NewG1Affine(expected)
+
+		circuit := hashToG1Circuit{
+			Msg: []uint8(msg),
+			Dst: dst,
+			Res: wrappedRes,
+		}
+		witness := hashToG1Circuit{
+			Msg: []uint8(msg),
+			Dst: dst,
+			Res: wrappedRes,
+		}
+		err := test.IsSolved(&circuit, &witness, ecc.BN254.ScalarField())
+		assert.NoError(err)
+	}
 }

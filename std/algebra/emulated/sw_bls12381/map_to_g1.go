@@ -2,12 +2,49 @@ package sw_bls12381
 
 import (
 	"fmt"
+	"github.com/consensys/gnark/std/hash/tofield"
+	"github.com/consensys/gnark/std/math/uints"
 
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fp"
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/hash_to_curve"
 	"github.com/consensys/gnark/frontend"
 	"github.com/consensys/gnark/std/math/emulated"
 )
+
+func (g1 *G1) HashToG1(msg []uints.U8, dst []byte) (*G1Affine, error) {
+	// Steps:
+	// 1. u = hash_to_field(msg, 2)
+	// 2. Q0 = map_to_curve(u[0])
+	// 3. Q1 = map_to_curve(u[1])
+	// 4. R = Q0 + Q1              # Point addition
+	// 5. P = clear_cofactor(R)
+	// 6. return P
+	lenPerBaseElement := len_per_base_element
+	lenInBytes := lenPerBaseElement * 2
+	uniformBytes, e := tofield.ExpandMsgXmd(g1.api, msg, dst, lenInBytes)
+	if e != nil {
+		return &G1Affine{}, e
+	}
+	fp, err := emulated.NewField[BaseField](g1.api)
+	ele1 := bytesToElement(g1.api, fp, uniformBytes[:lenPerBaseElement])
+	ele2 := bytesToElement(g1.api, fp, uniformBytes[lenPerBaseElement:lenPerBaseElement*2])
+
+	// we will still do iso_map before point addition, as we do not have point addition in E' (yet)
+	Q0, err := g1.MapToCurve1(ele1)
+	if err != nil {
+		return nil, fmt.Errorf("map to curve ele1: %w", err)
+	}
+	Q1, err := g1.MapToCurve1(ele2)
+	if err != nil {
+		return nil, fmt.Errorf("map to curve ele2: %w", err)
+	}
+	Q0 = g1.isogeny(Q0)
+	Q1 = g1.isogeny(Q1)
+
+	R := g1.add(Q0, Q1)
+
+	return g1.ClearCofactor(R), nil
+}
 
 func (g1 *G1) evalFixedPolynomial(monic bool, coefficients []fp.Element, x *baseEl) *baseEl {
 	emuCoefficients := make([]*baseEl, len(coefficients))
